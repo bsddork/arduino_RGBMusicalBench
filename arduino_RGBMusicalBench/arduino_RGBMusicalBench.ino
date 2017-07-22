@@ -1,6 +1,6 @@
 /*
- * Created By: Brian Woertendyke	bsddork@gmail.com
- * On: July 22, 2017
+ * Created By: Brian Woertendyke
+ * July 22, 2017
  * Project: Musical Bench with light show
  * 
  * Idea based on the original Musical Bench by the Exploratorium Tinkering Studio.
