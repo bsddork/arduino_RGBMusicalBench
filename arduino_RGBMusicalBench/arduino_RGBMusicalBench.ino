@@ -29,7 +29,7 @@
  * Color Hue conversion was made possible by http://www.brianneltner.com
  * Code was copied from: http://blog.saikoled.com/post/43693602826/why-every-led-light-should-be-using-hsi
  * 
- * Button control library from https://github.com/pkourany/clickButton
+ * Button control library from https://github.com/bsddork/clickButton
  * Library was modified to run on Arduino.
  */
 
