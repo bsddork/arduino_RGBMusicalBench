@@ -1,4 +1,4 @@
-# Arduino_RGBMusicalBench
+# Arduino RGB Musical Bench
 Musical Bench with RGB LED Lighting effects
 
 Idea based on the original Musical Bench by the Exploratorium Tinkering Studio.
