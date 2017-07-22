@@ -1,6 +1,6 @@
 /*
  * Created By: Brian Woertendyke	bsddork@gmail.com
- * On: July 14, 2017
+ * On: July 22, 2017
  * Project: Musical Bench with light show
  * 
  * Idea based on the original Musical Bench by the Exploratorium Tinkering Studio.
@@ -28,6 +28,9 @@
  * 
  * Color Hue conversion was made possible by http://www.brianneltner.com
  * Code was copied from: http://blog.saikoled.com/post/43693602826/why-every-led-light-should-be-using-hsi
+ * 
+ * Button control library from https://github.com/pkourany/clickButton
+ * Library was modified to run on Arduino.
  */
 
 
@@ -35,21 +38,25 @@
 #include <SoftwareSerial.h>  // needed for MIDI communications with the MI shield
 #include <math.h>
 #include <LEDFader.h>
+#include <ClickButton.h>
 
 // Global Constants - These values will never change
 #define DEBUG         false
 
 // Music Stuff
-#define SENSOR_HYSTERESIS 7  // ignore incremental changes smaller than this value...  needed to kill noise, but also affects how busy and dense the arpeggio is
-#define LOWEST_NOTE 48   // 48 = C3 in MIDI; the piano keyboard ranges from A0 = 21 through C8 = 108, the lowest octaves can be pretty muddy sounding
-#define HIGHEST_NOTE 96   // 96 = C7. A smaller range will result in a less busy feel, and may allow more repeated strikes of the same note.  You probably won't hear half of this range with human touch, but short the touch pads with metal and you will
-#define SOUND_MS      150   // Approx. loop rate in millis, all note durations will be integer multiples of this.  Tweak to speed up or slow down the arpeggio.
+#define SENSOR_HYSTERESIS 4 // ignore incremental changes smaller than this value...  needed to kill noise, but also affects how busy and dense the arpeggio is
+#define LOWEST_NOTE 48      // 48 = C3 in MIDI; the piano keyboard ranges from A0 = 21 through C8 = 108, the lowest octaves can be pretty muddy sounding
+#define HIGHEST_NOTE 96     // 96 = C7. A smaller range will result in a less busy feel, and may allow more repeated strikes of the same note.  You probably won't hear half of this range with human touch, but short the touch pads with metal and you will
+#define SOUND_MS 150        // Approx. loop rate in millis, all note durations will be integer multiples of this.  Tweak to speed up or slow down the arpeggio.
 
 // these should need less tweaking, but go ahead and see what they do
-#define MY_INSTRUMENT 46  // max 127.  GM1 Melodic bank instrument 0 is the Acoustic Grand Piano.  You could tweak this, but beware: since we are not using any note off method, if you pick one with long or infinite sustain, you'll get cacaphony in a hurry
-#define NOISE_FLOOR 1000 // out of 1023, higher than this is considered open circuit.
-#define VELOCITY  75  //  note strike "force", max 127
-#define VOLUME    110  //  max 127, 110 works well for most headphones and fine for most amplifiers as well
+#define MY_INSTRUMENT 0  // max 127.  GM1 Melodic bank instrument 0 is the Acoustic Grand Piano.  You could tweak this, but beware: since we are not using any note off method, if you pick one with long or infinite sustain, you'll get cacaphony in a hurry
+#define NOISE_FLOOR 1000  // out of 1023, higher than this is considered open circuit.
+#define VELOCITY  100     // note strike "force", max 127
+#define VOLUME    110     // max 127, 110 works well for most headphones and fine for most amplifiers as well
+
+// Button Function
+#define LONG    2000    // Long button press time in milliseconds
 
 // LED Tempo
 #define LED_MS        SOUND_MS*4    // Eighth note tempo
@@ -66,13 +73,16 @@
 #define RESET_PIN   4   // low active shield reset
 #define SENSOR_PIN  A0  // also known as P14
 
+// Button Pin
+#define BUTT        5   // Button Pin Digital Input
+
 // LED pin assignments
-#define R_PIN       9   // PWM RGB Red Pin
+#define R_PIN        9  // PWM RGB Red Pin
 #define G_PIN       10  // PWM RGB Green Pin
 #define B_PIN       13  // PWM RGB Blue Pin
-#define LED_NUM       3             // Number of LED PWM Pins in use
-#define UP            1             // Up slope
-#define DOWN          0             // Down slope
+#define LED_NUM      3  // Number of LED PWM Pins in use
+#define UP           1  // Up slope
+#define DOWN         0  // Down slope
 
 // Standard MIDI, ADDRESS == CH1 which is all we propose to use
 #define MIDI_BAUD     31250
@@ -96,17 +106,28 @@ unsigned int touchSensor;       // holds the most recent accepted sensor value.
 unsigned int sensorBuffer;      // holds a provisional sensor value while we look at it
 unsigned int note;              // holds the calculated MIDI note value
 
+byte insCounter = 0;            // counter for current instrument
+const byte iTable[30] = {           // Table of "good" sounding instruments, a lot sound similar
+  0,  4,  5,  6,  8,  11, 13, 15,
+  17, 18, 19, 20, 23, 27, 32, 36,
+  45, 47, 67, 71, 79, 80, 86, 88,
+  104,  105,  108,  113,  118,  124
+};
+
 unsigned int rgb[LED_NUM];           // RGB value storage, array of 3 values
 unsigned int lastHue = 0;     // Previous Hue value
+
+int function = 0;            // Button results
 
 boolean playNote = true;      // Default state of sound
 byte ledFadeState = 0;        // state of LED fading
 
 unsigned int ledFadeDelay = 2*LED_MS;   // Time to fade LED colors, this can change with tempo
 unsigned long currentMillis;      // store the current time
-unsigned long lastLEDtic;         // stateMachine for LED display
-unsigned long lastNotetic;        // stateMachine for Sound
-unsigned int timeDiff;            // current delay placeholder
+unsigned long lastLEDtic;         // stateMachine timer for LED display
+unsigned long lastNotetic;        // stateMachine timer for Sound
+boolean sustain = false;           // stateMachine for sustaining notes
+unsigned int timeDiff;            // placeholder for storing delay calculations
 
 
 // ---- Initialize Librarys ---- //
@@ -120,13 +141,15 @@ LEDFader leds[LED_NUM] = {
   LEDFader(13)
 };
 
+// Define the button properties
+ClickButton bob(BUTT, HIGH);
 
 // ---- Functions ----//
 void setup() {
   Serial.begin(115200);  // USB is for debugging and tuning info
-    //while (!Serial) {
-    //  ; // wait for serial port to connect. Needed for Leonardo only
-    // }
+    while (!Serial) {
+      ; // wait for serial port to connect. Needed for Leonardo only
+     }
    
   // reset pin set-up and hwr reset of the VS1053 on the MI shield.  It's probably going to make a fart-y sound if you have an external amplifier!
   pinMode(RESET_PIN, OUTPUT);
@@ -147,6 +170,9 @@ void setup() {
   currentMillis = millis();
   lastLEDtic = currentMillis;
   lastNotetic = currentMillis;
+
+  // Setup button timers (all in milliseconds / ms)
+  bob.longClickTime = LONG;     // time until "held-down clicks" register
   
 }
 
@@ -160,9 +186,9 @@ void chkTime() {
   // Add more state machines here for new functions that require delay time management
   // Create a static variable to keep track of time
   // ----------------------
+
   
   // ---- LED time check ---- //
-  
   // call the LED fade statemachine for background effects
   rgbUpdate();
   timeDiff = currentMillis - lastLEDtic;
@@ -178,6 +204,7 @@ void chkTime() {
     }
     lastLEDtic = currentMillis;           //Update the statemachine for next cycle
   }   //----END LED State Machine----//
+
 
   // Sound time check
   //-----------------//
@@ -288,6 +315,19 @@ void talkMIDI(byte cmd, byte data1, byte data2) {
   if(cmd != PROG_CHANGE) MIDIserial.write(data2); //Send 2nd data byte if needed; all of our supported commands other than PROG_CHANGE have 2 data bytes
 }
 
+// Change the active instrument
+void changeInstrument() {
+  if (insCounter < sizeof(iTable)-1) {      // Check the current counter value before increasing
+    insCounter++;
+  } 
+  else { insCounter = 0; }                        // reset counter when limit found
+
+  Serial.print("Instrument:");
+  Serial.println(iTable[insCounter]);
+  
+  talkMIDI(PROG_CHANGE, iTable[insCounter], 0);   // set specific instrument voice within bank.
+}
+
 void sensorInput() {
   // Read the sensor and play music
   int newHue;                               // buffer for new value
@@ -296,7 +336,7 @@ void sensorInput() {
   distance = abs(travel);                 // amount of movement
 
   if (sensorBuffer <= NOISE_FLOOR) {  // only play a note if the accepted sensor value is below the noise floor  
-    if (sensorBuffer <= 5 && lastNotetic > 5000) {  // Special Demo for cheaters
+    if (sensorBuffer <= 5 && lastNotetic > 5000) {  // Special Demo for cheaters, ignore the first 5 sec after reset
       easterEgg();
     }
     else if (distance >= SENSOR_HYSTERESIS)  {  // only accept a new sensor value if it differs from the last accepted value by the minimum amount
@@ -306,12 +346,16 @@ void sensorInput() {
       note = map(touchSensor, 0, 1023, HIGHEST_NOTE, LOWEST_NOTE);  // high sensor values (high resistence, light touch) map to low notes and V.V.
       
       velocity = map(distance, 0, 1023, 25, 127);  // large movements will equal stronger hits
-      //velocity = 100;
       
       playNote = true;    // a note is playing
+      
+      Serial.print("Note:");
+      Serial.println(note);
 
-      //talkMIDI(CONT_CHANGE , ALL_OFF, 0);  // turn off previous note(s); comment this out if you like the notes to ring over each other
-      talkMIDI(NOTE_ON , note, velocity);  // play new note!
+      if (!sustain) {      // check the mode for sustain
+        talkMIDI(CONT_CHANGE , ALL_OFF, 0);  // turn off previous note(s); comment this out if you like the notes to ring over each other
+      }
+      talkMIDI(NOTE_ON , note, VELOCITY);  // play new note! --Using constant velocity definition for even notes
     }
     travel = map(travel, -100, 100, -30, 30);                 // limit the travel distance in either direction
     newHue = lastHue + travel;                         // Change LED Color Hue
@@ -356,12 +400,36 @@ void easterEgg() {
   Serial.print("\n\n");
   Serial.print("Play Time");
   Serial.print("\n\n");
+
+  for (byte p = 0; p<3; p++) {
+    analogWrite(R_PIN,255);
+    delay(500);
+    analogWrite(R_PIN,0);
+    delay(500);
+  }
+  delay(1500);
   
   for (byte i = 0; i<25; i++) {
     analogWrite(G_PIN,255);
     talkMIDI(NOTE_ON, HIGHEST_NOTE, 100);
     delay(50);
     analogWrite(G_PIN,0);
+    talkMIDI(CONT_CHANGE , ALL_OFF, 0);
+    delay(50);
+  }
+  for (byte i = 0; i<25; i++) {
+    analogWrite(B_PIN,255);
+    talkMIDI(NOTE_ON, HIGHEST_NOTE-16, 100);
+    delay(50);
+    analogWrite(B_PIN,0);
+    talkMIDI(CONT_CHANGE , ALL_OFF, 0);
+    delay(50);
+  }
+  for (byte i = 0; i<25; i++) {
+    analogWrite(R_PIN,255);
+    talkMIDI(NOTE_ON, HIGHEST_NOTE-32, 100);
+    delay(50);
+    analogWrite(R_PIN,0);
     talkMIDI(CONT_CHANGE , ALL_OFF, 0);
     delay(50);
   }
@@ -374,8 +442,9 @@ void easterEgg() {
     analogWrite(B_PIN,rgb[2]);
     delay(10);
   }
+  delay(750);
 
-  for (int k=0; k<400; k++) {
+  for (int k=0; k<600; k++) {     // ~40 Hz Pulse
     analogWrite(R_PIN,255);
     analogWrite(G_PIN,255);
     analogWrite(B_PIN,255);
@@ -389,10 +458,31 @@ void easterEgg() {
   }
 }
 
+void buttonFunction() {
+  // ---- Button Presses ---- //
+  bob.Update();   // Check the button state
+  
+  if (bob.clicks != 0) function = bob.clicks;     // Save the button codes before next update
+  if(function == 2) {             // Double Click mode
+    sustain = sustain ? 0 : 1;    // Change sustain state (when true set false & vise versa)
+    Serial.print("Sustain:");
+    Serial.println(sustain);
+  }
+  if(function == 3) {             // Triple click
+    ;   // Do something special
+  }
+  if(function == -1) {            // Single Long press
+    changeInstrument();           // Change instrument
+  }
+  
+  function = 0;           // Reset function for next cycle
+}
+
 void loop(){
   // Main Loop
 
-  // call the stateMachine manager
-  chkTime();
+  buttonFunction();   // Button presses
+  
+  chkTime();      // call the stateMachine manager
   
 }
