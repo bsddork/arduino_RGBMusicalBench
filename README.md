@@ -26,7 +26,7 @@ The single button controls many functions by detecting multiple clicks or long c
 * Arduino Leonardo - https://store.arduino.cc/usa/arduino-leonardo-with-headers
 * Arduino IDE - https://www.arduino.cc/en/Main/Software
 
-### Installing
+## Installing
 
 Clone the repository and extract. Remove the "-master" from the folder name, then move into your Arduino projects folder.
 
