@@ -31,6 +31,9 @@ The single button controls many functions by detecting multiple clicks or long c
 Clone the repository and extract. Remove the "-master" from the folder name, then move into your Arduino projects folder.
 
 Get the required libraries also. Or else you will have some errors during compile time.
+### Dependencies
+* https://github.com/jgillick/arduino-LEDFader
+* https://github.com/bsddork/clickButton
 
 ## Authors
 
