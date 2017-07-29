@@ -35,7 +35,7 @@ Get the required libraries also. Or else you will have some errors during compil
 * https://github.com/jgillick/arduino-LEDFader
 * https://github.com/bsddork/clickButton
 
-## Authors
+## Author
 
 * **Brian Woertendyke**
 
