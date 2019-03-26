@@ -41,12 +41,11 @@
 #include <ClickButton.h>
 
 // Global Constants - These values will never change
-#define DEBUG         false
-
 // Music Stuff
 #define SENSOR_HYSTERESIS   4       // ignore incremental changes smaller than this value...  needed to kill noise, but also affects how busy and dense the arpeggio is
 #define LOWEST_NOTE         48      // 48 = C3 in MIDI; the piano keyboard ranges from A0 = 21 through C8 = 108, the lowest octaves can be pretty muddy sounding
 #define HIGHEST_NOTE        96      // 96 = C7. A smaller range will result in a less busy feel, and may allow more repeated strikes of the same note.  You probably won't hear half of this range with human touch, but short the touch pads with metal and you will
+#define EGG                 30      // Raw Analog Sensor value minimum to activate Easter Egg (0=short, 1023=open)
 
 // these should need less tweaking, but go ahead and see what they do
 #define MY_INSTRUMENT       0     // max 127.  GM1 Melodic bank instrument 0 is the Acoustic Grand Piano.  You could tweak this, but beware: since we are not using any note off method, if you pick one with long or infinite sustain, you'll get cacaphony in a hurry
@@ -126,6 +125,8 @@ unsigned long lastLEDtic;         // stateMachine timer for LED display
 unsigned long lastNotetic;        // stateMachine timer for Sound
 unsigned int timeDiff;            // placeholder for storing delay calculations
 
+boolean debug = false;             // when true, serial out is enabled
+boolean debugSensor = false;      // when true, sensor data is enabled
 
 // ---- Initialize Librarys ---- //
 // Define Music board
@@ -133,9 +134,9 @@ SoftwareSerial MIDIserial(RX_PIN, TX_PIN);  // channel for MIDI comms with the M
 
 // set PWM pins: red, green, blue
 LEDFader leds[LED_NUM] = {
-  LEDFader(9),
-  LEDFader(10),
-  LEDFader(13)
+  LEDFader(R_PIN),
+  LEDFader(G_PIN),
+  LEDFader(B_PIN)
 };
 
 // Define the button properties
@@ -143,10 +144,12 @@ ClickButton bob(BUTT, HIGH);
 
 // ---- Functions ----//
 void setup() {
-  Serial.begin(115200);  // USB is for debugging and tuning info
-    //while (!Serial) {
-    //  ; // wait for serial port to connect. Needed for Leonardo only
-    // }
+  if (debug) {
+    Serial.begin(115200);  // USB is for debugging and tuning info
+      while (!Serial) {
+        ; // wait for serial port to connect. Needed for Leonardo only
+      }
+  }
    
   // reset pin set-up and hwr reset of the VS1053 on the MI shield.  It's probably going to make a fart-y sound if you have an external amplifier!
   pinMode(RESET_PIN, OUTPUT);
@@ -161,16 +164,22 @@ void setup() {
   talkMIDI(CONT_CHANGE, BANK_SELECT, MELODIC_BANK);  // select instrument bank 
   talkMIDI(PROG_CHANGE, MY_INSTRUMENT, 0);   // set specific instrument voice within bank.
 
-  Serial.println("Begin - Start with Random Color");
-
-  // Start the timer
+    // Start the timer
   currentMillis = millis();
   lastLEDtic = currentMillis;
   lastNotetic = currentMillis;
 
   // Setup button timers (all in milliseconds / ms)
   bob.longClickTime = LONG;     // time until "held-down clicks" register
-  
+
+  // Randomize the instrument from the table
+  // First set a random seed then choose a random index number based on the size of iTable
+  randomSeed(analogRead(SENSOR_PIN));
+  insCounter = random(sizeof(iTable));
+  if (debug) {
+    Serial.print("Begin - Instrument Index#: ");
+    Serial.println(insCounter);
+  }
 }
 
 void chkTime() {
@@ -318,8 +327,12 @@ void sensorInput() {
   travel = (sensorBuffer-touchSensor);    // direction
   distance = abs(travel);                 // amount of movement
 
+  if (debug && debugSensor) {           // Debug output Sensor data
+    Serial.println(sensorBuffer);
+  }
+  
   if (sensorBuffer <= NOISE_FLOOR) {  // only play a note if the accepted sensor value is below the noise floor  
-    if (sensorBuffer <= 5 && lastNotetic > 5000) {  // Special Demo for cheaters, ignore the first 5 sec after reset
+    if (sensorBuffer <= EGG && lastNotetic > 5000) {  // Special Demo for cheaters, ignore the first 5 sec after reset
       easterEgg();
     }
     else if (distance >= SENSOR_HYSTERESIS)  {  // only accept a new sensor value if it differs from the last accepted value by the minimum amount
@@ -332,8 +345,10 @@ void sensorInput() {
       
       playNote = true;    // a note is playing
       
-      Serial.print("Note:");
-      Serial.println(note);
+      if (debug) { 
+        Serial.print("Note:");
+        Serial.println(note);
+      }
 
       if (!sustain) {      // check the mode for sustain
         talkMIDI(CONT_CHANGE , ALL_OFF, 0);  // turn off previous note(s); comment this out if you like the notes to ring over each other
@@ -369,9 +384,11 @@ void sensorInput() {
 // Odd surprise for anyone who trys shorting the sensors
 void easterEgg() {
   //delay(3000);
-  Serial.print("\n\n");
-  Serial.print("Play Time");
-  Serial.print("\n\n");
+  if (debug) { 
+    Serial.print("\n\n");
+    Serial.print("Play Time");
+    Serial.print("\n\n");
+  }
 
   for (byte p = 0; p<3; p++) {
     analogWrite(R_PIN,255);
@@ -436,32 +453,65 @@ void changeInstrument() {
     insCounter++;
   } 
   else { insCounter = 0; }                        // reset counter when limit found
+
+  if (debug) { 
+    Serial.print("Change Instrument:");
+    Serial.print(insCounter);
+    Serial.print("   ms:");
+    Serial.println(millis());
+  }
   
   talkMIDI(PROG_CHANGE, iTable[insCounter], 0);   // set specific instrument voice within bank.
+  talkMIDI(NOTE_ON, 24, 100);       // single bong with new instrument
+
+  for (int k=0; k<20; k++) {     // On/Off every 25ms = ~40 Hz Pulse & last 500msec
+    analogWrite(R_PIN,255);
+    analogWrite(G_PIN,255);
+    analogWrite(B_PIN,255);
+    delay(12);
+    analogWrite(R_PIN,0);
+    analogWrite(G_PIN,0);
+    analogWrite(B_PIN,0);
+    delay(13);
+  }
+  
+  talkMIDI(CONT_CHANGE , ALL_OFF, 0);
 }
 
 // ---- Button Presses ---- //
 void buttonFunction() {
   bob.Update();   // Check the button state
   
-  if (bob.clicks != 0) function = bob.clicks;     // Save the button codes before next update
+  if (bob.clicks != 0) {
+    function = bob.clicks;     // Save the button codes before next update
+    if (debug) {
+      Serial.print("Button:");
+      Serial.println(function);
+    }
+  }
   if(function == 2) {             // Double Click mode
     sustain = sustain ? 0 : 1;    // Change sustain state (when true set false & vise versa)
-    Serial.print("Sustain:");
-    Serial.println(sustain);
+    if (debug) { 
+      Serial.print("Sustain:");
+      Serial.println(sustain);
+    }
   }
   if(function == 3) {             // Triple click
     blinkLED = blinkLED ? 0 : 1;   // Change the state of blink mode, when true=blinking, false=fading
     ledFadeDelay = blinkLED ? SOUND_MS / 2 : LED_MS;    // Update the delay time on fade, blink will fade light to dark with note tempo
-    Serial.print("Blink:");
-    Serial.print(blinkLED);
-    Serial.print(" FadeDelay:");
-    Serial.println(ledFadeDelay);
+    if (debug) { 
+      Serial.print("Blink:");
+      Serial.print(blinkLED);
+      Serial.print(" FadeDelay:");
+      Serial.println(ledFadeDelay);
+    }
   }
   if(function == -1) {            // Single Long press
     changeInstrument();           // Change instrument 
-    Serial.print("Instrument:");
-    Serial.println(iTable[insCounter]);
+    if (debug) { 
+      Serial.print("Change Instrument:");
+      Serial.print(insCounter);
+    }
   }
   
   function = 0;           // Reset function for next cycle
