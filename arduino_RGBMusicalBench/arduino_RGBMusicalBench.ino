@@ -48,7 +48,6 @@
 #define EGG                 30      // Raw Analog Sensor value minimum to activate Easter Egg (0=short, 1023=open)
 
 // these should need less tweaking, but go ahead and see what they do
-#define MY_INSTRUMENT       0     // max 127.  GM1 Melodic bank instrument 0 is the Acoustic Grand Piano.  You could tweak this, but beware: since we are not using any note off method, if you pick one with long or infinite sustain, you'll get cacaphony in a hurry
 #define NOISE_FLOOR      1000     // out of 1023, higher than this is considered open circuit.
 #define VELOCITY          100     // note strike "force", max 127
 #define VOLUME            110     // max 127, 110 works well for most headphones and fine for most amplifiers as well
@@ -84,6 +83,7 @@
 #define PROG_CHANGE   0xC0  // program change message
 #define CONT_CHANGE   0xB0  // controller change message
 #define NOTE_ON       0x90  // sorry about the Hex, but MIDI is all about the nybbles!
+#define NOTE_OFF      0x80  // Used for a single note
 #define ALL_OFF       0x7B  // Using "all notes off" rather than "note off" for single voice MIDI is a common tactic; MIDI devices are notorious for orphaning notes
 #define BANK_SELECT   0x00
 #define CHANNEL_VOL   0x07
@@ -158,20 +158,6 @@ void setup() {
   digitalWrite(RESET_PIN, HIGH);
   delay(1000);
 
-  //Start soft serial channel for MIDI, and send one-time only messages
-  MIDIserial.begin(MIDI_BAUD);
-  talkMIDI(CONT_CHANGE , CHANNEL_VOL, VOLUME);   // set channel volume
-  talkMIDI(CONT_CHANGE, BANK_SELECT, MELODIC_BANK);  // select instrument bank 
-  talkMIDI(PROG_CHANGE, MY_INSTRUMENT, 0);   // set specific instrument voice within bank.
-
-    // Start the timer
-  currentMillis = millis();
-  lastLEDtic = currentMillis;
-  lastNotetic = currentMillis;
-
-  // Setup button timers (all in milliseconds / ms)
-  bob.longClickTime = LONG;     // time until "held-down clicks" register
-
   // Randomize the instrument from the table
   // First set a random seed then choose a random index number based on the size of iTable
   randomSeed(analogRead(SENSOR_PIN));
@@ -180,6 +166,42 @@ void setup() {
     Serial.print("Begin - Instrument Index#: ");
     Serial.println(insCounter);
   }
+
+  //Start soft serial channel for MIDI, and send one-time only messages
+  MIDIserial.begin(MIDI_BAUD);
+  talkMIDI(CONT_CHANGE , CHANNEL_VOL, VOLUME);   // set channel volume
+  talkMIDI(CONT_CHANGE, BANK_SELECT, MELODIC_BANK);  // select instrument bank 
+  talkMIDI(PROG_CHANGE, iTable[insCounter], 0);   // set specific instrument voice within bank.
+  
+  // System Startup Sound & Light
+  // Note1
+  analogWrite(R_PIN,250);
+  talkMIDI(NOTE_ON, 42, 100);
+  delay(75);
+  analogWrite(R_PIN,0);
+  talkMIDI(CONT_CHANGE , ALL_OFF, 0);
+
+  // Note2
+  analogWrite(G_PIN,250);
+  talkMIDI(NOTE_ON, 40, 100);       
+  delay(75);
+  analogWrite(G_PIN,0);
+  talkMIDI(CONT_CHANGE , ALL_OFF, 0);
+
+  // Note3
+  analogWrite(B_PIN,250);
+  talkMIDI(NOTE_ON, 46, 100);       
+  delay(75);
+  analogWrite(B_PIN,0);
+  talkMIDI(CONT_CHANGE , ALL_OFF, 0);
+
+  // Start the timer
+  currentMillis = millis();
+  lastLEDtic = currentMillis;
+  lastNotetic = currentMillis;
+
+  // Setup button timers (all in milliseconds / ms)
+  bob.longClickTime = LONG;     // time until "held-down clicks" register
 }
 
 void chkTime() {
@@ -391,7 +413,7 @@ void easterEgg() {
   }
 
   for (byte p = 0; p<3; p++) {
-    analogWrite(R_PIN,255);
+    analogWrite(R_PIN,250);
     delay(500);
     analogWrite(R_PIN,0);
     delay(500);
@@ -399,7 +421,7 @@ void easterEgg() {
   delay(1500);
   
   for (byte i = 0; i<25; i++) {
-    analogWrite(G_PIN,255);
+    analogWrite(G_PIN,250);
     talkMIDI(NOTE_ON, HIGHEST_NOTE, 100);
     delay(50);
     analogWrite(G_PIN,0);
@@ -407,7 +429,7 @@ void easterEgg() {
     delay(50);
   }
   for (byte i = 0; i<25; i++) {
-    analogWrite(B_PIN,255);
+    analogWrite(B_PIN,250);
     talkMIDI(NOTE_ON, HIGHEST_NOTE-16, 100);
     delay(50);
     analogWrite(B_PIN,0);
@@ -415,7 +437,7 @@ void easterEgg() {
     delay(50);
   }
   for (byte i = 0; i<25; i++) {
-    analogWrite(R_PIN,255);
+    analogWrite(R_PIN,250);
     talkMIDI(NOTE_ON, HIGHEST_NOTE-32, 100);
     delay(50);
     analogWrite(R_PIN,0);
@@ -434,9 +456,9 @@ void easterEgg() {
   delay(750);
 
   for (int k=0; k<600; k++) {     // ~40 Hz Pulse
-    analogWrite(R_PIN,255);
-    analogWrite(G_PIN,255);
-    analogWrite(B_PIN,255);
+    analogWrite(R_PIN,250);
+    analogWrite(G_PIN,250);
+    analogWrite(B_PIN,250);
     talkMIDI(NOTE_ON, 24, 100);
     delay(12);
     analogWrite(R_PIN,0);
@@ -465,9 +487,9 @@ void changeInstrument() {
   talkMIDI(NOTE_ON, 24, 100);       // single bong with new instrument
 
   for (int k=0; k<20; k++) {     // On/Off every 25ms = ~40 Hz Pulse & last 500msec
-    analogWrite(R_PIN,255);
-    analogWrite(G_PIN,255);
-    analogWrite(B_PIN,255);
+    analogWrite(R_PIN,250);
+    analogWrite(G_PIN,250);
+    analogWrite(B_PIN,250);
     delay(12);
     analogWrite(R_PIN,0);
     analogWrite(G_PIN,0);
@@ -525,3 +547,5 @@ void loop(){
   chkTime();      // call the stateMachine manager
   
 }
+
+
