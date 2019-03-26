@@ -160,7 +160,7 @@ void setup() {
 
   // Randomize the instrument from the table
   // First set a random seed then choose a random index number based on the size of iTable
-  randomSeed(analogRead(SENSOR_PIN));
+  randomSeed(analogRead(A1));
   insCounter = random(sizeof(iTable));
   if (debug) {
     Serial.print("Begin - Instrument Index#: ");
